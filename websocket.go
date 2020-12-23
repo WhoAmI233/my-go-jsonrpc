@@ -477,7 +477,6 @@ func (c *wsConn) setupPings() func() {
 	if c.pingInterval == 0 {
 		return func() {}
 	}
-	return func() {}
 
 	c.conn.SetPongHandler(func(appData string) error {
 		select {
