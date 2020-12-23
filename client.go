@@ -191,12 +191,12 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		connFactory = nil
 	}
 
+	requests := make(chan clientRequest)
+
 	c := client{
 		namespace:     namespace,
 		paramEncoders: config.paramEncoders,
 	}
-
-	requests := make(chan clientRequest)
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		select {
@@ -244,17 +244,55 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	exiting := make(chan struct{})
 	c.exiting = exiting
 
-	go (&wsConn{
-		conn:             conn,
-		connFactory:      connFactory,
-		reconnectBackoff: config.reconnectBackoff,
-		pingInterval:     config.pingInterval,
-		timeout:          config.timeout,
-		handler:          nil,
-		requests:         requests,
-		stop:             stop,
-		exiting:          exiting,
-	}).handleWsConn(ctx)
+	go func(ctx context.Context, c *websocket.Conn, config Config) {
+		defer close(exiting)
+		conn := c
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			wsc := (&wsConn{
+				conn:             conn,
+				connFactory:      connFactory,
+				reconnectBackoff: config.reconnectBackoff,
+				pingInterval:     config.pingInterval,
+				timeout:          config.timeout,
+				handler:          nil,
+				requests:         requests,
+				stop:             stop,
+				exiting:          exiting,
+			})
+
+			wsc.handleWsConn(ctx)
+
+			conn = nil
+			attempts := 0
+
+			for conn == nil {
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				default:
+					continue
+				}
+
+				time.Sleep(wsc.reconnectBackoff.next(attempts))
+				var err error
+				if conn, err = wsc.connFactory(); err != nil {
+					log.Debugw("websocket connection retry failed", "error", err, "try", attempts)
+				}
+				attempts++
+			}
+			log.Infof("reconnect successfully, try: %d", attempts)
+		}
+	}(ctx, conn, config)
 
 	if err := c.provide(outs); err != nil {
 		return nil, err
