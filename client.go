@@ -87,7 +87,7 @@ type client struct {
 	//////////my-change/////////
 }
 
-func (c *client) Exting() <-chan struct{} {
+func (c *client) Exiting() <-chan struct{} {
 	select {
 	case <-c.exiting:
 		return c.exiting
@@ -282,7 +282,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 			wsc.handleWsConn(ctx)
 
 			webConn = nil
-			attempts := 1
+			attempts := 0
 
 			for webConn == nil {
 				select {
