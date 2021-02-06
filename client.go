@@ -216,7 +216,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		select {
 		case requests <- cr:
 		///////////my-change///////////
-		case <-c.Exting():
+		case <-c.Exiting():
 			return clientResponse{}, fmt.Errorf("websocket routine exiting")
 			///////////my-change///////////
 		}
