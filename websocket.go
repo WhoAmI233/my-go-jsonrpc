@@ -521,7 +521,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 	c.pongs = make(chan struct{}, 1)
 
 	c.registerCh = make(chan outChanReg)
-	//defer close(c.exiting)
+	defer close(c.exiting)
 
 	// ////
 
@@ -533,7 +533,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 	// setup pings
 
 	stopPings := c.setupPings()
-	defer func() {stopPings()}()
+	defer func() { stopPings() }()
 
 	var timeoutTimer *time.Timer
 	if c.timeout != 0 {

@@ -82,6 +82,20 @@ type client struct {
 	doRequest func(context.Context, clientRequest) (clientResponse, error)
 	exiting   <-chan struct{}
 	idCtr     int64
+	//////////my-change/////////
+	wscExisting <-chan struct{}
+	//////////my-change/////////
+}
+
+func (c *client) Exting() <-chan struct{} {
+	select {
+	case <-c.exiting:
+		return c.exiting
+	case <-c.wscExisting:
+		return c.wscExisting
+	default:
+		return c.exiting
+	}
 }
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
@@ -201,8 +215,10 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		select {
 		case requests <- cr:
-		case <-c.exiting:
+		///////////my-change///////////
+		case <-c.Exting():
 			return clientResponse{}, fmt.Errorf("websocket routine exiting")
+			///////////my-change///////////
 		}
 
 		var ctxDone <-chan struct{}
@@ -244,20 +260,15 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	exiting := make(chan struct{})
 	c.exiting = exiting
 
-	go func(ctx context.Context, c *websocket.Conn, config Config) {
+	//////////my-change/////////
+	go func(ctx context.Context, conn *websocket.Conn, config Config) {
 		defer close(exiting)
-		conn := c
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ctx.Done():
-				return
-			default:
-			}
+		webConn := conn
 
+		for {
+			wscExiting := make(chan struct{})
 			wsc := (&wsConn{
-				conn:             conn,
+				conn:             webConn,
 				connFactory:      connFactory,
 				reconnectBackoff: config.reconnectBackoff,
 				pingInterval:     config.pingInterval,
@@ -265,34 +276,36 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 				handler:          nil,
 				requests:         requests,
 				stop:             stop,
-				exiting:          exiting,
+				exiting:          wscExiting,
 			})
 
 			wsc.handleWsConn(ctx)
 
-			conn = nil
-			attempts := 0
+			webConn = nil
+			attempts := 1
 
-			for conn == nil {
+			for webConn == nil {
 				select {
 				case <-stop:
 					return
 				case <-ctx.Done():
 					return
 				default:
-					continue
 				}
 
 				time.Sleep(wsc.reconnectBackoff.next(attempts))
+				log.Warnf("reconnecting websocket connection, tried: %d", attempts)
+
 				var err error
-				if conn, err = wsc.connFactory(); err != nil {
-					log.Debugw("websocket connection retry failed", "error", err, "try", attempts)
+				if webConn, err = wsc.connFactory(); err != nil {
+					log.Errorw("reconnecting websocket connection failed", "error", err, "tried", attempts)
 				}
 				attempts++
 			}
-			log.Infof("reconnect successfully, try: %d", attempts)
+			log.Infof("websocket successfully reconnected, tried: %d", attempts)
 		}
 	}(ctx, conn, config)
+	//////////my-change/////////
 
 	if err := c.provide(outs); err != nil {
 		return nil, err
@@ -300,7 +313,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 
 	return func() {
 		close(stop)
-		<-exiting
+		<-c.exiting
 	}, nil
 }
 
