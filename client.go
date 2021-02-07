@@ -82,20 +82,6 @@ type client struct {
 	doRequest func(context.Context, clientRequest) (clientResponse, error)
 	exiting   <-chan struct{}
 	idCtr     int64
-	//////////my-change/////////
-	wscExisting <-chan struct{}
-	//////////my-change/////////
-}
-
-func (c *client) Exiting() <-chan struct{} {
-	select {
-	case <-c.exiting:
-		return c.exiting
-	case <-c.wscExisting:
-		return c.wscExisting
-	default:
-		return c.exiting
-	}
 }
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
@@ -215,10 +201,8 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		select {
 		case requests <- cr:
-		///////////my-change///////////
-		case <-c.Exiting():
+		case <-c.exiting:
 			return clientResponse{}, fmt.Errorf("websocket routine exiting")
-			///////////my-change///////////
 		}
 
 		var ctxDone <-chan struct{}
